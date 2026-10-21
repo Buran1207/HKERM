@@ -53,3 +53,7 @@ Keep the schema and replace the four read-only files under `data/` (`stock_daily
 - 轨迹独立成图，箭头指向较晚日期；空心圆标记起点，菱形标记终点。
 - 总览速览、轮动地图、赛道深度、个股筛选四张股票表均添加「TradingView ↗」可点击列；个股详情提供直接跳转按钮。
 - 港股代码 `0700.HK` → `https://www.tradingview.com/symbols/HKEX-700/`。网站不处理 TradingView 账户认证，用户浏览器已登录时由 TradingView 维持会话。
+
+
+## 2026-10-21 Plotly hotfix
+Fixed history trail annotation property `color` -> `arrowcolor` to prevent ValueError on the History Rotation Trail chart. Historical data is unchanged.

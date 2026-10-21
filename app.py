@@ -211,7 +211,7 @@ with tabs[1]:
     if abs(x[j]-x[j-1])+abs(y[j]-y[j-1])<1e-12:continue
     trail_fig.add_annotation(x=float(x[j]),y=float(y[j]),ax=float(x[j-1]),ay=float(y[j-1]),
       xref='x',yref='y',axref='x',ayref='y',showarrow=True,
-      arrowhead=3,arrowsize=1.1,arrowwidth=2,color=color,opacity=.9)
+      arrowhead=3,arrowsize=1.1,arrowwidth=2,arrowcolor=color,opacity=.9)
    trail_fig.add_trace(go.Scatter(x=[x[0]],y=[y[0]],mode='markers',
        marker=dict(symbol='circle-open',size=13,color=color,line=dict(width=2,color=color)),
        showlegend=False,hovertemplate='起点 '+dates_h[0]+'<extra></extra>'))
