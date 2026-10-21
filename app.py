@@ -1,6 +1,7 @@
 """HKERM | Hong Kong Equity Rotation Monitor — read-only research dashboard."""
 from pathlib import Path
 import io
+import re
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -75,6 +76,22 @@ frame['rank']=np.arange(1,len(frame)+1)
 frame['state']=np.select([(frame[ex]>=0)&(frame.momentum>=0),(frame[ex]>=0)&(frame.momentum<0),(frame[ex]<0)&(frame.momentum>=0)],['领先强化','领先减弱','落后改善'],default='落后持续')
 
 def pct(x):return f'{x:+.2%}' if pd.notna(x) else '—'
+def tradingview_url(code):
+    """Official TradingView HKEX instrument page; keep login/session with TradingView."""
+    value=str(code).strip().upper()
+    m=re.fullmatch(r'(\d{1,5})(?:\.HK)?',value)
+    if not m: return None
+    ticker=str(int(m.group(1)))
+    return f'https://www.tradingview.com/symbols/HKEX-{ticker}/'
+
+def linked_stock_table(table, code_column, label='TradingView ↗'):
+    """Provide real clickable per-stock external links, alongside all original columns."""
+    result=table.copy()
+    result[label]=result[code_column].map(tradingview_url)
+    st.dataframe(result,use_container_width=True,hide_index=True,
+        height=min(650,80+len(result)*35),
+        column_config={label:st.column_config.LinkColumn(label,display_text='打开图表 ↗')})
+
 def figstyle(fig,height=420):
  fig.update_layout(template='plotly_white',height=height,margin=dict(l=10,r=20,t=32,b=20),font=dict(family='Arial, sans-serif',size=12,color='#20334a'),paper_bgcolor='#ffffff',plot_bgcolor='#ffffff',hoverlabel=dict(bgcolor='white'),legend=dict(orientation='h',y=1.12,x=0))
  return fig
@@ -149,7 +166,7 @@ with tabs[0]:
   quick=st.selectbox('选择赛道 · 查看成分股',quick_ids,format_func=lambda x:next((r['sector'] for _,r in frame[frame.sector_id==x].iterrows()),x),key='overview_quick_sector')
   subset=sector_constituents(quick,asof)
   st.caption(f'赛道股票共 {len(subset)} 只；按所选日期的总市值代理降序排列，缺失市值置后。')
-  view_table(subset)
+  linked_stock_table(subset,'股票代码')
  else:
   st.warning('当前日期与最低股票数条件下没有有效赛道，请调低左侧最低有效股票数。')
  st.markdown('### 全部赛道排名')
@@ -171,16 +188,47 @@ with tabs[1]:
   ids=frame.sector_id.tolist();labels=dict(zip(frame.sector_id,frame.sector))
   chosen=st.multiselect('选择赛道查看轨迹',options=ids,default=ids[:4],format_func=lambda x:labels.get(x,x),max_selections=8)
   days=st.slider('轨迹长度（交易日）',3,25,10)
-  for sid in chosen:
-   hist=sectors[(sectors.sector_id==sid)&(sectors.date<=asof)].sort_values('date').tail(days).copy()
+  # A standalone history chart, with real arrowheads oriented from earlier to later days.
+  trail_fig=go.Figure()
+  palette=px.colors.qualitative.Safe
+  count=0
+  for idx,sid in enumerate(chosen):
+   hist=sectors[(sectors.sector_id==sid)&(sectors.date<=asof)].sort_values('date').tail(days+1).copy()
    hist['mom']=hist[ex].diff()
-   hist=hist[hist.mom.notna()]
+   hist=hist.dropna(subset=[ex,'mom'])
    if len(hist)<2:continue
-   fig.add_trace(go.Scatter(x=hist[ex],y=hist.mom,mode='lines+markers',line=dict(width=2),marker=dict(size=6),name=labels.get(sid,sid),hovertext=hist.date.dt.strftime('%Y-%m-%d')))
-  st.plotly_chart(figstyle(fig,580),use_container_width=True,key='trails')
-  st.markdown('#### 地图上赛道包含哪些股票？')
+   x=hist[ex].to_numpy(dtype=float);y=hist['mom'].to_numpy(dtype=float)
+   color=palette[idx % len(palette)]
+   dates_h=hist.date.dt.strftime('%Y-%m-%d').tolist()
+   trail_fig.add_trace(go.Scatter(x=x,y=y,mode='lines+markers',
+       line=dict(width=2.6,color=color),marker=dict(size=6,color=color),
+       name=labels.get(sid,sid),customdata=dates_h,
+       hovertemplate='%{customdata}<br>相对收益 %{x:.2%}<br>日动量 %{y:.2%}<extra>'+labels.get(sid,sid)+'</extra>'))
+   # Arrowheads at selected segments, including the final segment. Avoid zero-length arrows.
+   stride=max(1,(len(x)-1)//5)
+   positions=sorted(set(list(range(stride,len(x),stride))+[len(x)-1]))
+   for j in positions:
+    if abs(x[j]-x[j-1])+abs(y[j]-y[j-1])<1e-12:continue
+    trail_fig.add_annotation(x=float(x[j]),y=float(y[j]),ax=float(x[j-1]),ay=float(y[j-1]),
+      xref='x',yref='y',axref='x',ayref='y',showarrow=True,
+      arrowhead=3,arrowsize=1.1,arrowwidth=2,color=color,opacity=.9)
+   trail_fig.add_trace(go.Scatter(x=[x[0]],y=[y[0]],mode='markers',
+       marker=dict(symbol='circle-open',size=13,color=color,line=dict(width=2,color=color)),
+       showlegend=False,hovertemplate='起点 '+dates_h[0]+'<extra></extra>'))
+   trail_fig.add_trace(go.Scatter(x=[x[-1]],y=[y[-1]],mode='markers+text',
+       marker=dict(symbol='diamond',size=11,color=color),text=['终点'],textposition='top center',
+       showlegend=False,hovertemplate='终点 '+dates_h[-1]+'<extra></extra>'))
+   count+=1
+  trail_fig.add_hline(y=0,line_color='#becbd8',line_width=1)
+  trail_fig.add_vline(x=0,line_color='#becbd8',line_width=1)
+  trail_fig.update_xaxes(title=f'{horizon}D相对HSCI超额收益',tickformat='.1%')
+  trail_fig.update_yaxes(title='超额收益日变化',tickformat='.1%')
+  st.caption('箭头方向＝较早交易日 → 较晚交易日；空心圆为起点，菱形为终点。横轴为赛道超额收益，纵轴为超额收益的日变化。')
+  if count:st.plotly_chart(figstyle(trail_fig,580),use_container_width=True,key='trails')
+  else:st.info('所选赛道在此日期缺少足够的连续轨迹记录。')
+  st.markdown('#### 赛道成分股')
   quick_sid=st.selectbox('查看地图赛道成分股',ids,format_func=lambda x:labels.get(x,x),key='rotation_quick_sector')
-  view_table(sector_constituents(quick_sid,asof,limit=25))
+  linked_stock_table(sector_constituents(quick_sid,asof,limit=25),'股票代码')
   st.caption('最多显示按市值排序前25只；完整名单可在「市场总览」的赛道速览查看。')
  description()
 
@@ -202,7 +250,7 @@ with tabs[2]:
   for h1 in [1,5,20,60]:focusstocks[f'{h1}D收益%']=(focusstocks[f'ret_{h1}']*100).round(2)
   focusstocks['市值代理_亿']=(focusstocks.cap/1e8).round(1)
   st.markdown('**赛道股票（按当日总市值代理排序）**')
-  view_table(focusstocks[['code','name','close','市值代理_亿','1D收益%','5D收益%','20D收益%','60D收益%','mapping_source','mapping_review']].rename(columns={'code':'股票','name':'名称','close':'收盘价','mapping_source':'分类来源','mapping_review':'核验状态'}))
+  linked_stock_table(focusstocks[['code','name','close','市值代理_亿','1D收益%','5D收益%','20D收益%','60D收益%','mapping_source','mapping_review']].rename(columns={'code':'股票','name':'名称','close':'收盘价','mapping_source':'分类来源','mapping_review':'核验状态'}),'股票')
   st.download_button('下载该赛道股票数据',focusstocks.to_csv(index=False).encode('utf-8-sig'),file_name=f'HKERM_{sid}_{selected}.csv',mime='text/csv')
   st.warning('该页采用研究用固定成分股分类；个别公司分类仍未按年报全部核验。龙头高度集中时，赛道走势可能主要代表单只股票。')
 
@@ -230,9 +278,11 @@ with tabs[3]:
   # Selectbox binds the selected code to the stock chart below.
   chosen_code=st.selectbox('选择股票 · 显示下方详情及历史走势',allcodes,
                            format_func=lambda c:f"{c}  {daily.loc[daily.code==c,'name'].iloc[0]}  ·  {daily.loc[daily.code==c,'sector'].iloc[0]}",key='stock_detail_choice')
-  view_table(daily[['code','name','sector','HSI','HSCEI','HSTECH','总市值代理(亿)','1D收益(%)','5D收益(%)','20D收益(%)','60D收益(%)','mapping_review']].rename(columns={'code':'代码','name':'名称','sector':'细分赛道','mapping_review':'分类核验'}))
+  linked_stock_table(daily[['code','name','sector','HSI','HSCEI','HSTECH','总市值代理(亿)','1D收益(%)','5D收益(%)','20D收益(%)','60D收益(%)','mapping_review']].rename(columns={'code':'代码','name':'名称','sector':'细分赛道','mapping_review':'分类核验'}),'代码')
   st.download_button('下载当前筛选股票 CSV',daily.to_csv(index=False).encode('utf-8-sig'),file_name=f'HKERM_stocks_{selected}.csv',mime='text/csv')
   st.divider()
+  tv=tradingview_url(chosen_code)
+  if tv:st.link_button('在 TradingView 打开该股票 ↗',tv,help='使用浏览器现有 TradingView 会话；账号登录由 TradingView 管理。')
   stock_chart(chosen_code,asof)
 
 with tabs[4]:
