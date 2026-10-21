@@ -37,3 +37,12 @@ py -3.12 -m streamlit run app.py
 ## Updating data in future
 
 Keep the schema and replace the four read-only files under `data/` (`stock_daily.csv.gz`, `sector_daily.csv.gz`, `benchmark.csv`, `stock_master.csv`) and the taxonomy CSV together with consistent as-of dates. Do not commit iFinD credentials, API tokens, local model artifacts, or unpublished research to a public repository.
+
+## 2026-10-21 页面交互修复
+
+- Sidebar 下拉框采用高对比度白底深色选中值；下拉选项也明确使用深色文字。
+- 市场总览增加「赛道成分股速览」：选赛道查看股票、市值代理、成交额及多期限价格收益。
+- 轮动地图增加「查看地图赛道成分股」，快速展示市值前25只。
+- 个股筛选现在按日期、行业、指数和关键词实时过滤；选中具体股票后展示指标与历史走势图，不再只是静态大表。
+- 保留2026-09-02截止的原数据，不新增采集、不连接训练模型。
+- 解压本ZIP后将根目录的 app.py、requirements.txt、data/、.streamlit/、README.md 等直接覆盖 GitHub 仓库根目录。提交后等待 Streamlit Cloud 重新部署。

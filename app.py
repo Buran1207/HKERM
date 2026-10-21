@@ -12,15 +12,24 @@ st.set_page_config(page_title='HKERM | Hong Kong Equity Rotation Monitor',page_i
 CSS='''<style>
 .block-container{padding-top:1.3rem;padding-bottom:2rem;max-width:1540px}
 [data-testid="stSidebar"]{background:#111e32}
-[data-testid="stSidebar"] *{color:#f1f5f9}
-[data-testid="stSidebar"] [data-baseweb="select"] *{color:#101b2c}
+[data-testid="stSidebar"] label,[data-testid="stSidebar"] .stCaption,[data-testid="stSidebar"] p{color:#eaf2ff!important}
+/* Select boxes use a LIGHT background. Text in both chosen values and options must be DARK. */
+[data-testid="stSidebar"] [data-baseweb="select"] > div{background:#fff!important;border:1px solid #9baec5!important}
+[data-testid="stSidebar"] [data-baseweb="select"] [role="combobox"],
+[data-testid="stSidebar"] [data-baseweb="select"] [role="combobox"] *,
+[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-baseweb="select"] div[data-testid="stMarkdownContainer"]{color:#15243a!important;-webkit-text-fill-color:#15243a!important;opacity:1!important}
+[data-testid="stSidebar"] [data-baseweb="select"] svg{fill:#15243a!important;color:#15243a!important}
+[data-baseweb="popover"] [role="option"], [data-baseweb="popover"] [role="option"] *{color:#15243a!important;-webkit-text-fill-color:#15243a!important}
+[data-baseweb="popover"] [aria-selected="true"]{background:#d9eaf9!important}
 h1,h2,h3{letter-spacing:-.035em}h1{font-weight:750!important}
 .kicker{color:#7893ad;font-size:12px;font-weight:700;letter-spacing:2px}
 .info{font-size:12px;color:#64748b}.section{font-size:13px;color:#718096;text-transform:uppercase;letter-spacing:1.1px}
 div[data-testid="stMetric"]{background:#f5f8fc;border:1px solid #e6ecf3;padding:14px;border-radius:10px}
 div[data-testid="stMetricLabel"]{font-weight:600}
 div[data-testid="stMetricValue"]{font-size:1.7rem}
-</style>'''
+</style>''' 
 st.markdown(CSS,unsafe_allow_html=True)
 COLORS={'rise':'#168c78','fall':'#d65c61','navy':'#172d49','blue':'#3e79ae','gold':'#d5a453'}
 
@@ -73,6 +82,34 @@ def figstyle(fig,height=420):
 def view_table(df,columns=None):
  st.dataframe(df if columns is None else df[columns],use_container_width=True,hide_index=True,height=min(650,80+len(df)*35))
 
+def sector_constituents(sid, asof, limit=None):
+    """Point-in-time *prices*, fixed current membership; no returns are recomputed."""
+    cols=['code','close','amount','cap','ret_1','ret_5','ret_20','ret_60']
+    members=master.loc[master.sector_id==sid,['code','name','sector','mapping_review']].merge(
+        prices.loc[prices.date==asof,cols],on='code',how='left'
+    ).sort_values('cap',ascending=False,na_position='last')
+    members['总市值代理(亿)']=(members.cap/1e8).round(1)
+    members['成交额(百万)']=(members.amount/1e6).round(1)
+    for h in (1,5,20,60):members[f'{h}D收益(%)']=(members[f'ret_{h}']*100).round(2)
+    visible=members[['code','name','总市值代理(亿)','成交额(百万)','1D收益(%)','5D收益(%)','20D收益(%)','60D收益(%)','mapping_review']].rename(columns={'code':'股票代码','name':'公司名称','mapping_review':'分类核验'})
+    return visible if limit is None else visible.head(limit)
+
+def stock_chart(stock_code, asof):
+    h=prices[(prices.code==stock_code)&(prices.date<=asof)].sort_values('date').copy()
+    if h.empty:
+        st.warning('所选日期无该股票行情。可以尝试选择另一只股票或其他研究日期。')
+        return
+    obj=master[master.code==stock_code].iloc[0]
+    last=h.iloc[-1]
+    a,b,c=st.columns(3)
+    a.metric('当前可用收盘价',f"{last['close']:.3f}" if pd.notna(last['close']) else '—')
+    b.metric('5日价格收益',pct(last['ret_5']))
+    c.metric('总市值代理（亿）',f"{last['cap']/1e8:,.1f}" if pd.notna(last['cap']) else '—')
+    fig=go.Figure(go.Scatter(x=h.date,y=h.close,mode='lines+markers',line=dict(color=COLORS['blue'],width=2.7),name='收盘价'))
+    fig.update_layout(xaxis_title='交易日期',yaxis_title='未复权收盘价',title=f"{obj['name']} · {stock_code}｜历史价格（截至所选日）")
+    st.plotly_chart(figstyle(fig,340),use_container_width=True)
+    st.caption(f"细分赛道：{obj['sector']} ｜ 分类状态：{obj['mapping_review']}。走势图只覆盖网页内置的46个交易日，未复权；不代表完整历史。")
+
 def description():
  st.caption('口径：赛道X日收益＝窗口期初总市值代理（收盘价×总股本）加权个股X日原始价格收益；赛道X日超额＝赛道X日收益－恒生综指同期收益。未复权，极端原始价格跳变窗口已过滤。')
 
@@ -105,6 +142,16 @@ with tabs[0]:
    top3='、'.join(frame.head(3).sector.tolist());weak='、'.join(frame.tail(3).sector.tolist())
    st.markdown(f'**领先赛道：**{top3}。\n\n**相对落后：**{weak}。')
  description()
+ st.markdown('### 赛道成分股速览')
+ st.caption('无需跳转页面：选择任意赛道，立即查看其中所有股票及市值排序。行业筛选与研究日期同步生效。')
+ if len(frame):
+  quick_ids=frame.sector_id.tolist()
+  quick=st.selectbox('选择赛道 · 查看成分股',quick_ids,format_func=lambda x:next((r['sector'] for _,r in frame[frame.sector_id==x].iterrows()),x),key='overview_quick_sector')
+  subset=sector_constituents(quick,asof)
+  st.caption(f'赛道股票共 {len(subset)} 只；按所选日期的总市值代理降序排列，缺失市值置后。')
+  view_table(subset)
+ else:
+  st.warning('当前日期与最低股票数条件下没有有效赛道，请调低左侧最低有效股票数。')
  st.markdown('### 全部赛道排名')
  listing=frame[['rank','industry','sector','state',num,ret,ex,breadth,con,'momentum']].copy()
  listing.columns=['排名','一级行业','细分赛道','状态','有效股数',f'{horizon}D赛道收益',f'{horizon}D超额vs HSCI','上涨广度','最大市值权重','超额日变化']
@@ -131,6 +178,10 @@ with tabs[1]:
    if len(hist)<2:continue
    fig.add_trace(go.Scatter(x=hist[ex],y=hist.mom,mode='lines+markers',line=dict(width=2),marker=dict(size=6),name=labels.get(sid,sid),hovertext=hist.date.dt.strftime('%Y-%m-%d')))
   st.plotly_chart(figstyle(fig,580),use_container_width=True,key='trails')
+  st.markdown('#### 地图上赛道包含哪些股票？')
+  quick_sid=st.selectbox('查看地图赛道成分股',ids,format_func=lambda x:labels.get(x,x),key='rotation_quick_sector')
+  view_table(sector_constituents(quick_sid,asof,limit=25))
+  st.caption('最多显示按市值排序前25只；完整名单可在「市场总览」的赛道速览查看。')
  description()
 
 with tabs[2]:
@@ -156,18 +207,33 @@ with tabs[2]:
   st.warning('该页采用研究用固定成分股分类；个别公司分类仍未按年报全部核验。龙头高度集中时，赛道走势可能主要代表单只股票。')
 
 with tabs[3]:
- st.markdown('### Stock Explorer')
+ st.markdown('### 个股筛选 · 研究日股票查询')
+ st.caption('用途：按照股票、行业、指数成员资格过滤581股，然后选中单只股票查看具体价格、收益和历史走势。所有筛选和图表随左侧研究日期变化。')
  daily=master.merge(prices[prices.date==asof],on='code',how='left')
- q=st.text_input('搜索股票代码 / 公司名称 / 细分赛道',placeholder='例如：0700、腾讯、半导体')
- index_filter=st.selectbox('指数标签',['全部','HSI','HSCEI','HSTECH'])
+ c1,c2,c3=st.columns([2,1,1])
+ with c1:q=st.text_input('输入股票代码、公司名称或赛道',placeholder='例如：0700、腾讯、半导体',key='stock_search')
+ with c2:index_filter=st.selectbox('指数成员筛选',['全部','HSI','HSCEI','HSTECH'],key='stock_index')
+ with c3:stock_industry=st.selectbox('股票所属行业',['全部行业']+sorted(tax.industry.dropna().unique()),index=(['全部行业']+sorted(tax.industry.dropna().unique())).index(industry_choice),key='stock_industry')
  if index_filter!='全部':daily=daily[daily[index_filter]==1]
- if industry_choice!='全部':daily=daily[daily.sector_id.isin(tax[tax.industry==industry_choice].sector_id)]
- if q:daily=daily[daily[['code','name','sector']].fillna('').astype(str).apply(lambda a:a.str.contains(q,case=False,regex=False)).any(axis=1)]
- daily=daily.sort_values('cap',ascending=False)
- daily['总市值代理(亿)']=(daily.cap/1e8).round(1)
- for h1 in [1,5,20,60]:daily[f'{h1}D收益%']=(daily[f'ret_{h1}']*100).round(2)
- view_table(daily[['code','name','sector','HSI','HSCEI','HSTECH','总市值代理(亿)','1D收益%','5D收益%','20D收益%','60D收益%','mapping_review']].rename(columns={'code':'代码','name':'名称','sector':'细分赛道','mapping_review':'分类核验'}))
- st.download_button('下载筛选股票 CSV',daily.to_csv(index=False).encode('utf-8-sig'),file_name=f'HKERM_stocks_{selected}.csv',mime='text/csv')
+ if stock_industry!='全部行业':daily=daily[daily.sector_id.isin(tax[tax.industry==stock_industry].sector_id)]
+ if q:
+  query=q.strip().lower()
+  daily=daily[daily[['code','name','sector']].fillna('').astype(str).apply(lambda a:a.str.lower().str.contains(query,regex=False)).any(axis=1)]
+ daily=daily.sort_values('cap',ascending=False,na_position='last')
+ st.markdown(f'**当前筛选：{len(daily)} 只股票**')
+ if daily.empty:
+  st.warning('没有符合条件的股票。请清除搜索词，或将指数/行业筛选改为「全部」。')
+ else:
+  daily['总市值代理(亿)']=(daily.cap/1e8).round(1)
+  for h1 in [1,5,20,60]:daily[f'{h1}D收益(%)']=(daily[f'ret_{h1}']*100).round(2)
+  allcodes=daily.code.tolist()
+  # Selectbox binds the selected code to the stock chart below.
+  chosen_code=st.selectbox('选择股票 · 显示下方详情及历史走势',allcodes,
+                           format_func=lambda c:f"{c}  {daily.loc[daily.code==c,'name'].iloc[0]}  ·  {daily.loc[daily.code==c,'sector'].iloc[0]}",key='stock_detail_choice')
+  view_table(daily[['code','name','sector','HSI','HSCEI','HSTECH','总市值代理(亿)','1D收益(%)','5D收益(%)','20D收益(%)','60D收益(%)','mapping_review']].rename(columns={'code':'代码','name':'名称','sector':'细分赛道','mapping_review':'分类核验'}))
+  st.download_button('下载当前筛选股票 CSV',daily.to_csv(index=False).encode('utf-8-sig'),file_name=f'HKERM_stocks_{selected}.csv',mime='text/csv')
+  st.divider()
+  stock_chart(chosen_code,asof)
 
 with tabs[4]:
  st.markdown('### 数据说明与质量控制')
