@@ -1,0 +1,11 @@
+{
+  "release_id": "HK_RAW_20261023T033244Z_0c6e2a0e",
+  "asof": "2026-10-22",
+  "created": "2026-10-23T03:34:10.516950+00:00",
+  "fields": [
+    "stock_daily.csv.gz",
+    "sector_daily.csv.gz",
+    "benchmark.csv"
+  ],
+  "backup": "C:\\code\\DATA\\HK\\_SITE_BACKUPS\\20261023_113409"
+}
