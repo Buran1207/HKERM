@@ -183,11 +183,20 @@ def tradingview_url(code):
 def linked_stock_table(table, code_column, label='TradingView ↗'):
     """Provide real clickable per-stock external links, alongside all original columns."""
     result=table.copy()
-    result[label]=result[code_column].map(tradingview_url)
-    result.columns=[T(c) for c in result.columns]
+    # Resolve the ticker from raw schema first. Some callers already localize headers.
+    # Never assume a Chinese column exists when the UI is in English.
+    candidates=[code_column,T(code_column),'股票代码','股票','代码','Ticker','code']
+    found=next((candidate for candidate in candidates if candidate in result.columns),None)
+    if found is None:
+        st.error(T('缺少股票代码字段；无法建立TradingView链接。'))
+        st.dataframe(result,use_container_width=True,hide_index=True)
+        return
+    # Add URL before changing display headers. The link column is independent of language.
+    result['TradingView ↗']=result[found].map(tradingview_url)
+    result=result.rename(columns={c:T(c) for c in result.columns if c!='TradingView ↗'})
     st.dataframe(result,use_container_width=True,hide_index=True,
         height=min(650,80+len(result)*35),
-        column_config={label:st.column_config.LinkColumn(label,display_text=T('打开图表 ↗'))})
+        column_config={'TradingView ↗':st.column_config.LinkColumn('TradingView ↗',display_text=T('打开图表 ↗'))})
 
 def figstyle(fig,height=420):
  fig.update_layout(template='plotly_white',height=height,margin=dict(l=10,r=20,t=32,b=20),font=dict(family='Arial, sans-serif',size=12,color='#20334a'),paper_bgcolor='#ffffff',plot_bgcolor='#ffffff',hoverlabel=dict(bgcolor='white'),legend=dict(orientation='h',y=1.12,x=0))
@@ -206,7 +215,7 @@ def sector_constituents(sid, asof, limit=None):
     members['成交额(百万)']=(members.amount/1e6).round(1)
     for h in (1,5,20,60):members[f'{h}D收益(%)']=(members[f'ret_{h}']*100).round(2)
     visible=members[['code','name','总市值代理(亿)','成交额(百万)','1D收益(%)','5D收益(%)','20D收益(%)','60D收益(%)','mapping_review']].rename(columns={'code':'股票代码','name':'公司名称','mapping_review':'分类核验'})
-    visible.columns=[T(c) for c in visible.columns]
+    # Keep stable raw column names for all downstream consumers; localize only on display.
     return visible if limit is None else visible.head(limit)
 
 def stock_chart(stock_code, asof):
