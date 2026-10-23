@@ -34,7 +34,7 @@ div[data-testid="stMetricValue"]{font-size:1.7rem}
 st.markdown(CSS,unsafe_allow_html=True)
 # Display language is a presentation preference only; source data and classification keys remain unchanged.
 with st.sidebar:
-    language=st.selectbox(T('Language / 语言'), ['English', '中文'], index=0, key='hkerm_language')
+    language=st.selectbox('Language / 语言', ['English', '中文'], index=0, key='hkerm_language')
 EN=language=='English'
 _TRANSLATIONS={
  '研究日期 / As of':'Research date / As of','观察周期':'Lookback period','研究行业':'Research industry',
